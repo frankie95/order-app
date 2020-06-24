@@ -1,74 +1,88 @@
-import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-import * as React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { RectButton, ScrollView } from 'react-native-gesture-handler';
+import { Image, StyleSheet, View, KeyboardAvoidingView, Platform,StatusBar} from "react-native";
+import React, { useState,useContext } from 'react';
+import imageLogo from "../assets/images/icon.png";
+import Button from "../components/Button";
+import FormTextInput from "../components/FormTextInput";
+import {Context} from "../context/CouponContext"
+const strings = {
+  LOGIN: "Log In",
+  WELCOME_TO_LOGIN: "Welcome to the login screen!",
+  EMAIL_PLACEHOLDER: "Username",
+  PASSWORD_PLACEHOLDER: "Password"
+};
+export default LoginScreen = () => {
+  const {signIn} = useContext(Context)
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const handleEmailChange = (email) => {
+    setEmail(email)
+  };
 
-export default function LinksScreen() {
+  const handlePasswordChange = (password) => {
+    setPassword(password)
+  };
+
+  const handleLoginPress = () => {
+    console.log("Login button pressed");
+  };
+
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      <OptionButton
-        icon="md-school"
-        label="Read the Expo documentation"
-        onPress={() => WebBrowser.openBrowserAsync('https://docs.expo.io')}
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#FFFFFF"
       />
-
-      <OptionButton
-        icon="md-compass"
-        label="Read the React Navigation documentation"
-        onPress={() => WebBrowser.openBrowserAsync('https://reactnavigation.org')}
-      />
-
-      <OptionButton
-        icon="ios-chatboxes"
-        label="Ask a question on the forums"
-        onPress={() => WebBrowser.openBrowserAsync('https://forums.expo.io')}
-        isLastOption
-      />
-    </ScrollView>
-  );
-}
-
-function OptionButton({ icon, label, onPress, isLastOption }) {
-  return (
-    <RectButton style={[styles.option, isLastOption && styles.lastOption]} onPress={onPress}>
-      <View style={{ flexDirection: 'row' }}>
-        <View style={styles.optionIconContainer}>
-          <Ionicons name={icon} size={22} color="rgba(0,0,0,0.35)" />
-        </View>
-        <View style={styles.optionTextContainer}>
-          <Text style={styles.optionText}>{label}</Text>
-        </View>
+      <Image source={imageLogo} style={styles.logo} />
+      <View style={styles.form}>
+        <FormTextInput
+          value={email}
+          onChangeText={handleEmailChange}
+          placeholder={strings.EMAIL_PLACEHOLDER}
+          keyboardType='default'
+        />
+        <FormTextInput
+          value={password}
+          onChangeText={handlePasswordChange}
+          placeholder={strings.PASSWORD_PLACEHOLDER}
+          secureTextEntry
+          keyboardType='default'
+        />
+        <Button label={strings.LOGIN} onPress={()=>signIn(email)} />
       </View>
-    </RectButton>
+    </KeyboardAvoidingView>
   );
 }
+
+const colors = {
+  BLACK: "#000",
+  WHITE: "#FFF",
+  DODGER_BLUE: "#428AF8",
+  SILVER: "#BEBEBE",
+  TORCH_RED: "#F8262F",
+  MISCHKA: "#E5E4E6"
+};
+
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fafafa',
+    backgroundColor: colors.WHITE,
+    alignItems: "center",
+    justifyContent: "space-between"
   },
-  contentContainer: {
-    paddingTop: 15,
+  logo: {
+    flex: 1,
+    width: "100%",
+    resizeMode: "contain",
+    alignSelf: "center"
   },
-  optionIconContainer: {
-    marginRight: 12,
-  },
-  option: {
-    backgroundColor: '#fdfdfd',
-    paddingHorizontal: 15,
-    paddingVertical: 15,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: 0,
-    borderColor: '#ededed',
-  },
-  lastOption: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  optionText: {
-    fontSize: 15,
-    alignSelf: 'flex-start',
-    marginTop: 1,
-  },
+  form: {
+    flex: 1,
+    justifyContent: "center",
+    width: "80%"
+  }
 });

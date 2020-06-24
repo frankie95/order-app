@@ -1,179 +1,378 @@
-import * as WebBrowser from 'expo-web-browser';
-import * as React from 'react';
-import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import React, { Component } from 'react'
+import {
+  Alert,
+  Platform,
+  Dimensions,
+  LayoutAnimation,
+  Text,
+  View,
+  StatusBar,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  AsyncStorage
+} from 'react-native'
+import { BarCodeScanner } from 'expo-barcode-scanner';
+import * as Permissions from 'expo-permissions'
+import { Ionicons } from '@expo/vector-icons'
 
-import { MonoText } from '../components/StyledText';
+let timer = null
 
-export default function HomeScreen() {
-  return (
-    <View style={styles.container}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        <View style={styles.welcomeContainer}>
-          <Image
-            source={
-              __DEV__
-                ? require('../assets/images/robot-dev.png')
-                : require('../assets/images/robot-prod.png')
-            }
-            style={styles.welcomeImage}
-          />
-        </View>
+export default class HomeScreen extends Component {
+  static navigationOptions = {
+    header: null
+  }
+  state = {
+    hasCameraPermission: null,
+    scannedTableId: null,
+    currentBillId: null,
+    isLoading: null,
+    menu: null,
+    franchise: null,
+    error: null
+  }
 
-        <View style={styles.getStartedContainer}>
-          <DevelopmentModeNotice />
+  componentDidMount () {
+    this.requestCameraPermission()
+    this.props.navigation.addListener('willFocus', route => {
+      if (this.props.navigation.getParam('closeSession')) {
+        clearTimeout(timer)
+        this.props.navigation.setParams({ closeSession: false })
+        this.setState({
+          franchise: null,
+          currentBillId: null,
+          isLoading: null,
+          menu: null,
+          error: null
+        })
+      }
+    })
+  }
 
-          <Text style={styles.getStartedText}>Open up the code for this screen:</Text>
+  requestCameraPermission = async () => {
+    const { status } = await Permissions.askAsync(Permissions.CAMERA)
+    this.setState({
+      hasCameraPermission: status === 'granted'
+    })
+  }
 
-          <View style={[styles.codeHighlightContainer, styles.homeScreenFilename]}>
-            <MonoText>screens/HomeScreen.js</MonoText>
-          </View>
+  expireError = () =>
+    setTimeout(() => {
+      this.setState({ error: null })
+    }, 3000)
 
-          <Text style={styles.getStartedText}>
-            Change any of the text, save the file, and your app will automatically reload.
+  handleBarCodeRead = result => {
+    const { scannedTableId, isLoading } = this.state
+    const tableId = result.data.substring(7, result.data.length)
+
+    if (!isLoading) {
+      LayoutAnimation.spring()
+      this.setState(
+        {
+          isLoading: true,
+          scannedTableId: tableId
+        },
+        this.fetchTableInfo
+      )
+    }
+  }
+
+  fetchTableInfo = () => {
+    const { scannedTableId, isTaken } = this.state
+    return fetch(
+      `https://alfred-waiter.herokuapp.com/api/tables/${scannedTableId}/currentBill`
+    )
+      .then(response => response.json())
+      .then(responseJson => {
+        if (responseJson.error) throw responseJson.error
+
+        // FIXME: Uncomment this then. It is commented for testing purposes
+        // There is already a currentBill in that table
+        // if (Object.keys(responseJson).length !== 0) {
+        //   throw {
+        //     message:
+        //       'This table appears to be taken. Please contact your waiter'
+        //   }
+        // }
+        return scannedTableId
+      })
+      .then(() => this.createBillAndUpdateTable())
+      .then(() => this.fetchRestaurant())
+      .then(() => this.fetchMenu())
+      .then(() => this.setState({ isLoading: false, error: null }))
+      .catch(error => {
+        console.log(error)
+        this.setState(
+          {
+            error: error,
+            isLoading: false
+          },
+          this.expireError
+        )
+      })
+  }
+
+  createBillAndUpdateTable = () => {
+    const { scannedTableId } = this.state
+    return fetch('https://alfred-waiter.herokuapp.com/api/bills', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        client: {
+          platform: Platform.OS
+        }
+      })
+    })
+      .then(response => response.json())
+      .then(responseJson => {
+        this.setState({ currentBillId: responseJson.id })
+        AsyncStorage.setItem('currentBillId', responseJson.id)
+        return fetch(
+          `https://alfred-waiter.herokuapp.com/api/tables/${scannedTableId}`,
+          {
+            method: 'PATCH',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              currentBillId: responseJson.id,
+              updatedAt: new Date()
+            })
+          }
+        )
+      })
+  }
+
+  fetchRestaurant = () => {
+    const { scannedTableId } = this.state
+    return fetch(
+      `http://alfred-waiter.herokuapp.com/api/tables/${scannedTableId}/franchise`
+    )
+      .then(response => response.json())
+      .then(responseJson => {
+        this.setState({
+          franchise: responseJson
+        })
+      })
+  }
+
+  fetchMenu = () => {
+    const { scannedTableId } = this.state
+    return fetch(
+      `http://alfred-waiter.herokuapp.com/api/tables/${scannedTableId}/menu`
+    )
+      .then(response => response.json())
+      .then(responseJson => {
+        // console.log({responseJson});
+        this.setState({
+          menu: responseJson
+        })
+      })
+  }
+
+  goToMenu = () => {
+    const { navigate } = this.props.navigation
+    const { menu, franchise, currentBillId, scannedTableId } = this.state
+    navigate('Menu', {
+      menu,
+      franchise,
+      currentBillId,
+      tableId: scannedTableId
+    })
+  }
+
+  render () {
+    const { isLoading, hasCameraPermission, franchise, error } = this.state
+    const { containerPrincipal, cameraImage } = styles
+
+    if (isLoading === true) return <LoadingScreen />
+    if (error !== null) return <ErrorScreen error={error} />
+    if (franchise !== null) {
+      return <SuccessScreen franchise={franchise} navFunction={this.goToMenu} />
+    }
+
+    return (
+      <View style={containerPrincipal}>
+        {hasCameraPermission === null ? (
+          <Text>Requesting for camera permission</Text>
+        ) : hasCameraPermission === false ? (
+          <Text style={{ color: '#fff' }}>
+            Camera permission is not granted
           </Text>
-        </View>
+        ) : (
+          <BarCodeScanner
+            onBarCodeRead={this.handleBarCodeRead}
+            style={{
+              height: Dimensions.get('window').height,
+              width: Dimensions.get('window').width
+            }}
+          >
+            <Image
+              source={require('../assets/images/scan-splash.png')}
+              style={cameraImage}
+            />
+          </BarCodeScanner>
+        )}
 
-        <View style={styles.helpContainer}>
-          <TouchableOpacity onPress={handleHelpPress} style={styles.helpLink}>
-            <Text style={styles.helpLinkText}>Help, it didn’t automatically reload!</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      <View style={styles.tabBarInfoContainer}>
-        <Text style={styles.tabBarInfoText}>This is a tab bar. You can edit it in:</Text>
-
-        <View style={[styles.codeHighlightContainer, styles.navigationFilename]}>
-          <MonoText style={styles.codeHighlightText}>navigation/BottomTabNavigator.js</MonoText>
-        </View>
+        <StatusBar hidden />
       </View>
-    </View>
-  );
-}
-
-HomeScreen.navigationOptions = {
-  header: null,
-};
-
-function DevelopmentModeNotice() {
-  if (__DEV__) {
-    const learnMoreButton = (
-      <Text onPress={handleLearnMorePress} style={styles.helpLinkText}>
-        Learn more
-      </Text>
-    );
-
-    return (
-      <Text style={styles.developmentModeText}>
-        Development mode is enabled: your app will be slower but you can use useful development
-        tools. {learnMoreButton}
-      </Text>
-    );
-  } else {
-    return (
-      <Text style={styles.developmentModeText}>
-        You are not in development mode: your app will run at full speed.
-      </Text>
-    );
+    )
   }
 }
 
-function handleLearnMorePress() {
-  WebBrowser.openBrowserAsync('https://docs.expo.io/versions/latest/workflow/development-mode/');
+const LoadingScreen = () => {
+  const {
+    container,
+    splashContainer,
+    loadingImage,
+    splashTextContainer,
+    splashText
+  } = styles
+  return (
+    <View style={container}>
+      <View style={splashContainer}>
+        <Image
+          source={require('../assets/images/loading.gif')}
+          style={loadingImage}
+        />
+      </View>
+
+      <View style={splashTextContainer}>
+        <Text style={splashText}>Loading...</Text>
+      </View>
+
+      <StatusBar hidden />
+    </View>
+  )
 }
 
-function handleHelpPress() {
-  WebBrowser.openBrowserAsync(
-    'https://docs.expo.io/versions/latest/get-started/create-a-new-app/#making-your-first-change'
-  );
+const ErrorScreen = ({ error }) => {
+  const { container, splashContainer, splashTextContainer, errorText } = styles
+  return (
+    <View style={container}>
+      <View style={splashContainer}>
+        <Ionicons
+          name={Platform.OS === 'ios' ? `ios-close-circle` : 'md-close-circle'}
+          size={150}
+          color="red"
+        />
+      </View>
+
+      <View style={splashTextContainer}>
+        <Text style={errorText}>{error.message}</Text>
+      </View>
+      <StatusBar hidden />
+    </View>
+  )
+}
+
+const SuccessScreen = ({ franchise, navFunction }) => {
+  const {
+    container,
+    splashContainer,
+    splashTextContainer,
+    splashText,
+    buttonMenu,
+    textMenuButton
+  } = styles
+  timer = setTimeout(() => {
+    navFunction()
+  }, 1000)
+  return (
+    <View style={container}>
+      <View style={splashContainer}>
+        <Ionicons
+          name={
+            Platform.OS === 'ios'
+              ? `ios-checkmark-circle`
+              : 'md-checkmark-circle'
+          }
+          size={150}
+          color="green"
+        />
+      </View>
+      <View style={splashTextContainer}>
+        <Text style={splashText}>{franchise.name}</Text>
+      </View>
+      <TouchableOpacity
+        style={buttonMenu}
+        onPress={navFunction}
+        accessibilityLabel="Go to Menu"
+      >
+        <Text style={textMenuButton}> Go to Menu </Text>
+      </TouchableOpacity>
+      <StatusBar hidden />
+    </View>
+  )
 }
 
 const styles = StyleSheet.create({
+  containerPrincipal: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000'
+  },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff'
   },
-  developmentModeText: {
-    marginBottom: 20,
-    color: 'rgba(0,0,0,0.4)',
-    fontSize: 14,
-    lineHeight: 19,
-    textAlign: 'center',
+  cameraImage: {
+    position: 'relative',
+    flex: 1,
+    height: Dimensions.get('window').height,
+    width: Dimensions.get('window').width
   },
-  contentContainer: {
-    paddingTop: 30,
-  },
-  welcomeContainer: {
+  splashContainer: {
     alignItems: 'center',
     marginTop: 10,
-    marginBottom: 20,
+    marginBottom: 20
   },
-  welcomeImage: {
+  loadingImage: {
     width: 100,
     height: 80,
     resizeMode: 'contain',
     marginTop: 3,
-    marginLeft: -10,
+    marginLeft: -10
   },
-  getStartedContainer: {
+  splashTextContainer: {
     alignItems: 'center',
-    marginHorizontal: 50,
+    marginHorizontal: 50
   },
-  homeScreenFilename: {
-    marginVertical: 7,
-  },
-  codeHighlightText: {
-    color: 'rgba(96,100,109, 0.8)',
-  },
-  codeHighlightContainer: {
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    borderRadius: 3,
-    paddingHorizontal: 4,
-  },
-  getStartedText: {
-    fontSize: 17,
+  splashText: {
+    fontSize: 25,
     color: 'rgba(96,100,109, 1)',
     lineHeight: 24,
     textAlign: 'center',
+    fontStyle: 'italic'
   },
-  tabBarInfoContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    ...Platform.select({
-      ios: {
-        shadowColor: 'black',
-        shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-      },
-      android: {
-        elevation: 20,
-      },
-    }),
-    alignItems: 'center',
-    backgroundColor: '#fbfbfb',
-    paddingVertical: 20,
-  },
-  tabBarInfoText: {
+  errorText: {
     fontSize: 17,
     color: 'rgba(96,100,109, 1)',
-    textAlign: 'center',
+    lineHeight: 24,
+    textAlign: 'justify'
   },
-  navigationFilename: {
-    marginTop: 5,
+  rightText: {
+    fontSize: 17,
+    color: 'rgba(96,100,109, 1)',
+    lineHeight: 24,
+    textAlign: 'right'
   },
-  helpContainer: {
-    marginTop: 15,
+  buttonMenu: {
     alignItems: 'center',
+    backgroundColor: '#fff',
+    marginTop: 20
   },
-  helpLink: {
-    paddingVertical: 15,
-  },
-  helpLinkText: {
-    fontSize: 14,
-    color: '#2e78b7',
-  },
-});
+  textMenuButton: {
+    color: '#007aff',
+    fontSize: 20,
+    lineHeight: 20,
+    fontStyle: 'italic'
+  }
+})
